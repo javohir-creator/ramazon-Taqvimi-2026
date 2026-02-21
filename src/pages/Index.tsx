@@ -23,7 +23,7 @@ const Index = () => {
   const [schedule, setSchedule] = useState<{ day: number; saharlik: string; iftorlik: string }[]>([]);
   useEffect(() => {
     const controller = new AbortController();
-   fetch("https://ramazon-taqvimi-2026.onrender.com/api/areas", { signal: controller.signal })
+    fetch("/api/areas", { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("failed");
         return r.json();
