@@ -79,22 +79,22 @@ const QiblaCompass = ({ region }: QiblaCompassProps) => {
   }, []);
 
   const requestPermission = async () => {
-    const DevOrient = DeviceOrientationEvent as unknown as {
-      requestPermission?: () => Promise<"granted" | "denied">;
-    };
-    if (typeof DevOrient !== "undefined" && typeof DevOrient.requestPermission === "function") {
+    const DevOrient =
+      typeof window !== "undefined"
+        ? (window as unknown as { DeviceOrientationEvent?: { requestPermission?: () => Promise<"granted" | "denied"> } })
+            .DeviceOrientationEvent
+        : undefined;
+    if (DevOrient && typeof DevOrient.requestPermission === "function") {
       try {
         const permission = await DevOrient.requestPermission();
-        if (permission === "granted") {
-          setPermissionState("granted");
-        } else {
-          setPermissionState("denied");
-        }
+        setPermissionState(permission === "granted" ? "granted" : "denied");
       } catch {
         setPermissionState("denied");
       }
-    } else {
+    } else if (DevOrient) {
       setPermissionState("granted");
+    } else {
+      setPermissionState("denied");
     }
   };
 
