@@ -1,23 +1,20 @@
-import cors from 'cors';
 import express from "express";
 import cron from "node-cron";
 import { initDb, getPrayerTimeByRegionDistrictDate, dbEnabled } from "./db.js";
 import { runScrape2026 } from "./cron/scrape2026.js";
 
 const app = express();
-
-// ✅ CORS sozlamasi (Vercel + local development uchun)
-app.use(cors({
-  origin: [
-    "https://ramazon-taqvimi-2026.vercel.app", 
-    "http://localhost:5173"
-  ],
-  methods: ["GET", "POST"],
-  credentials: true
-}));
-
-app.use(express.json());
 const PORT = process.env.PORT || 3001;
+
+const CORS_ORIGIN = process.env.CORS_ORIGIN || "*";
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", CORS_ORIGIN);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
+  next();
+});
 
 async function fetchText(url) {
   const controller = new AbortController();
@@ -445,6 +442,146 @@ app.get("/", (_req, res) => {
     status: "ok",
     endpoints: ["/api/areas", "/api/namozvaqti", "/api/ramazon-2026", "/api/times", "/api/prayer-times"],
   });
+});
+
+app.get("/api/geo-resolve", async (req, res) => {
+  try {
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({ error: "BadRequest", message: "lat and lon required" });
+    }
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=12&addressdetails=1`, {
+      headers: { "Accept-Language": "en", "User-Agent": "Mozilla/5.0" },
+      timeout: 10000,
+    });
+    if (!r.ok) return res.status(502).json({ error: "UpstreamError", message: "failed reverse geocoding", status: r.status });
+    const j = await r.json();
+    const addr = j?.address || {};
+    const rawState = String(addr.state || addr.region || "");
+    const rawCity = String(addr.city || addr.town || addr.village || addr.municipality || "");
+    const rawArea = String(addr.district || addr.county || addr.suburb || addr.neighbourhood || rawCity || "");
+    const n = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .replace(/’|ʻ|‘|ʼ|`/g, "'")
+        .replace(/'/g, "'")
+        .replace(/\s+/g, " ")
+        .trim();
+    const enToUz = {
+      tashkent: "toshkent",
+      "tashkent region": "toshkent viloyati",
+      "tashkent city": "toshkent shahri",
+      samarkand: "samarqand",
+      bukhara: "buxoro",
+      andijan: "andijon",
+      namangan: "namangan",
+      fergana: "farg'ona",
+      jizzakh: "jizzax",
+      sirdarya: "sirdaryo",
+      navoi: "navoiy",
+      khorezm: "xorazm",
+      surkhandarya: "surxondaryo",
+      kashkadarya: "qashqadaryo",
+      karakalpakstan: "qoraqalpog'iston",
+      urgench: "urganch",
+      nukus: "nukus",
+      chilanzar: "chilonzor",
+      yakkasaray: "yakkasaroy",
+      mirabad: "mirobod",
+      yashnabad: "yashnobod",
+      sheikhantaur: "shayxontohur",
+    };
+    const s = n(enToUz[n(rawState)] || rawState);
+    const cCity = n(enToUz[n(rawCity)] || rawCity);
+    const cArea = n(enToUz[n(rawArea)] || rawArea);
+    const regions = await ensureAreas();
+    const pickRegion = () => {
+      for (const rgn of regions) {
+        const rn = n(rgn.name);
+        if (s && (rn === s || rn.includes(s) || s.includes(rn))) return rgn.name;
+        const base = rn.replace(/\s+(viloyati|shahri)$/i, "");
+        if (s && (base === s || s.includes(base) || base.includes(s))) return rgn.name;
+        // also try city token
+        if (cCity && (rn === cCity || rn.includes(cCity) || cCity.includes(rn))) return rgn.name;
+        if (cCity) {
+          const cBase = cCity.replace(/\s+(viloyati|shahri)$/i, "");
+          if (rn === cBase || rn.includes(cBase) || cBase.includes(rn)) return rgn.name;
+        }
+      }
+      // heuristic: if state mentions tashkent city, pick Toshkent shahri
+      if (/toshkent/.test(s) && /shahri|city/.test(rawState.toLowerCase())) {
+        const r = regions.find((x) => /toshkent shahri/i.test(x.name));
+        if (r) return r.name;
+      }
+      if (/toshkent/.test(cCity) && /shahri/.test(cCity)) {
+        const r = regions.find((x) => /toshkent shahri/i.test(x.name));
+        if (r) return r.name;
+      }
+      return regions[0]?.name || "";
+    };
+    const regionName = pickRegion();
+    const regionObj = regions.find((x) => x.name === regionName) || regions[0];
+    const pickDistrict = () => {
+      for (const d of regionObj.districts) {
+        const dn = n(d).replace(/\s+(tumani|shahri)$/i, "");
+        const cand = cArea.replace(/\s+(district|city|county|tumani|shahri)$/i, "");
+        const altCand = cand.replace(/x/g, "h"); // handle Shayxontohur vs Shayhontohur
+        const altDn = dn.replace(/x/g, "h");
+        if (dn === cand || dn.includes(cand) || cand.includes(dn) || altDn === altCand) return d;
+      }
+      // Special handling for Toshkent shahri using substring checks
+      if (/toshkent shahri/i.test(regionName)) {
+        const base = n(cArea).replace(/\s+(district|city|county|tumani|shahri)$/i, "");
+        const toshCityMap = {
+          shayhontohur: "Shayxontohur",
+          yunusabad: "Yunusobod",
+          yakkasaray: "Yakkasaroy",
+          mirobod: "Mirobod",
+          mirabad: "Mirobod",
+          yashnobod: "Yashnobod",
+          bektemir: "Bektemir",
+          sergeli: "Sergeli",
+          olmazor: "Olmazor",
+          uchtepa: "Uchtepa",
+        };
+        for (const k of Object.keys(toshCityMap)) {
+          if (base.includes(k)) {
+            const target = toshCityMap[k];
+            const dname = regionObj.districts.find((d) => n(d) === n(target));
+            if (dname) return dname;
+          }
+        }
+      }
+      // Toshkent shahri suburbs synonyms
+      const syn = {
+        chilanzar: "Chilonzor",
+        yakkasaray: "Yakkasaroy",
+        mirabad: "Mirobod",
+        yashnabad: "Yashnobod",
+        sheikhantaur: "Shayxontohur",
+        "shayhontohur": "Shayxontohur",
+        yunusabad: "Yunusobod",
+        uchtepe: "Uchtepa",
+        uchtepa: "Uchtepa",
+        bektemir: "Bektemir",
+        sergeli: "Sergeli",
+        olmazor: "Olmazor",
+        "mirzo ulugbek": "Mirzo Ulug‘bek",
+        "mirzo ulug'bek": "Mirzo Ulug‘bek",
+      };
+      const synKey = n(cArea).replace(/\s+(district|city|county|tumani|shahri)$/i, "");
+      if (syn[synKey]) {
+        const dname = regionObj.districts.find((d) => n(d) === n(syn[synKey]));
+        if (dname) return dname;
+      }
+      return regionObj.districts[0] || "";
+    };
+    const districtName = pickDistrict();
+    return res.json({ region: regionName, district: districtName });
+  } catch (e) {
+    res.status(500).json({ error: "ServerError", message: e?.message || "Unknown error" });
+  }
 });
 
 initDb().then(() => {
