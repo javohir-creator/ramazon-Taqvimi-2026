@@ -1,9 +1,22 @@
+import cors from 'cors';
 import express from "express";
 import cron from "node-cron";
 import { initDb, getPrayerTimeByRegionDistrictDate, dbEnabled } from "./db.js";
 import { runScrape2026 } from "./cron/scrape2026.js";
 
 const app = express();
+
+// ✅ CORS sozlamasi (Vercel + local development uchun)
+app.use(cors({
+  origin: [
+    "https://ramazon-taqvimi-2026.vercel.app", 
+    "http://localhost:5173"
+  ],
+  methods: ["GET", "POST"],
+  credentials: true
+}));
+
+app.use(express.json());
 const PORT = process.env.PORT || 3001;
 
 async function fetchText(url) {
