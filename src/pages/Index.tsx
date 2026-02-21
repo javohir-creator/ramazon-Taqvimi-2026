@@ -23,7 +23,8 @@ const Index = () => {
   const [schedule, setSchedule] = useState<{ day: number; saharlik: string; iftorlik: string }[]>([]);
   useEffect(() => {
     const controller = new AbortController();
-    fetch("/api/areas", { signal: controller.signal })
+    //o'zgardi
+   fetch("https://ramazon-taqvimi-2026.onrender.com/api/areas", { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("failed");
         return r.json();
@@ -47,6 +48,7 @@ const Index = () => {
     if (!selectedRegion && !selectedDistrict) return;
     const controller = new AbortController();
     const qs = new URLSearchParams({ region: selectedRegion, district: selectedDistrict });
+    //o'zgardi
     fetch(`https://ramazon-taqvimi-2026.onrender.com/api/namozvaqti?${qs.toString()}`, {
   signal: controller.signal
       })
@@ -70,6 +72,7 @@ const Index = () => {
     if (!selectedRegion && !selectedDistrict) return;
     const controller = new AbortController();
     const qs = new URLSearchParams({ region: selectedRegion, district: selectedDistrict });
+    //o'zgardi
     fetch(`https://ramazon-taqvimi-2026.onrender.com/api/ramazon-2026?${qs.toString()}`, {
   signal: controller.signal
       })
