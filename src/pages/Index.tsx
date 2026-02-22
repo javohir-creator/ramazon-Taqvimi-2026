@@ -181,7 +181,7 @@ const Index = () => {
       <StarryBackground />
 
       <a
-        href="Nurli Ramazon.apk" // <-- Mana shu joyni o'zgartirdik
+        href="NurliRamazon.apk" // <-- Mana shu joyni o'zgartirdik
         target="_blank"
         rel="noopener noreferrer"
         download
