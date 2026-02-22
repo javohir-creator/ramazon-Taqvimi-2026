@@ -13,6 +13,38 @@ import { Moon, Sun } from "lucide-react";
 import { generatePrayerTimes, duas } from "@/data/prayerTimes";
 import { useDynamicFavicon } from "@/hooks/useDynamicFavicon";
 
+const API_BASE: string =
+  ((import.meta as unknown as { env?: Record<string, string> }).env?.VITE_API_BASE) || "/api";
+
+function norm(s: string) {
+  return s
+    .toLowerCase()
+    .replace(/’|ʻ|‘|ʼ|`/g, "'")
+    .replace(/'/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const enToUz: Record<string, string> = {
+  tashkent: "toshkent",
+  "tashkent region": "toshkent viloyati",
+  "tashkent city": "toshkent shahri",
+  samarkand: "samarqand",
+  bukhara: "buxoro",
+  andijan: "andijon",
+  namangan: "namangan",
+  fergana: "farg'ona",
+  jizzakh: "jizzax",
+  sirdarya: "sirdaryo",
+  navoi: "navoiy",
+  khorezm: "xorazm",
+  surkhandarya: "surxondaryo",
+  kashkadarya: "qashqadaryo",
+  karakalpakstan: "qoraqalpog'iston",
+  urganch: "urganch",
+  nukus: "nukus",
+};
+
 const Index = () => {
   const [areaList, setAreaList] = useState<{ name: string; districts: string[] }[]>([]);
   const [selectedRegion, setSelectedRegion] = useState("");
@@ -23,8 +55,7 @@ const Index = () => {
   const [schedule, setSchedule] = useState<{ day: number; saharlik: string; iftorlik: string }[]>([]);
   useEffect(() => {
     const controller = new AbortController();
-    //o'zgardi
-   fetch("https://ramazon-taqvimi-2026.onrender.com/api/areas", { signal: controller.signal })
+    fetch(`${API_BASE}/areas`, { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("failed");
         return r.json();
@@ -32,26 +63,67 @@ const Index = () => {
       .then((data) => {
         const arr = Array.isArray(data?.regions) ? data.regions : [];
         setAreaList(arr);
-        if (arr.length > 0) {
-          const r0 = arr[0];
-          if (!selectedRegion) {
-            setSelectedRegion(r0.name);
-            setSelectedDistrict(r0.districts[0] || "");
-          }
-        }
       })
       .catch(() => {});
     return () => controller.abort();
   }, []);
+  useEffect(() => {
+    if (areaList.length && !selectedRegion) {
+      const r0 = areaList[0];
+      setSelectedRegion(r0.name);
+      setSelectedDistrict(r0.districts[0] || "");
+    }
+  }, [areaList, selectedRegion]);
+
+  useEffect(() => {
+    if (!("geolocation" in navigator)) {
+      const r0 = areaList[0];
+      if (!selectedRegion && r0) {
+        setSelectedRegion(r0.name);
+        setSelectedDistrict(r0.districts?.[0] || "");
+      }
+      return;
+    }
+    const controller = new AbortController();
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const { latitude, longitude } = pos.coords;
+          const url = `${API_BASE}/geo-resolve?lat=${latitude}&lon=${longitude}`;
+          const r = await fetch(url, { signal: controller.signal });
+          if (!r.ok) throw new Error("geo resolve failed");
+          const j = await r.json();
+          const regionName = String(j?.region || "");
+          const districtName = String(j?.district || "");
+          if (!selectedRegion) {
+            setSelectedRegion(regionName);
+            setSelectedDistrict(districtName);
+          }
+        } catch {
+          const r0 = areaList[0];
+          if (!selectedRegion && r0) {
+            setSelectedRegion(r0.name);
+            setSelectedDistrict(r0.districts?.[0] || "");
+          }
+        }
+      },
+      () => {
+        const r0 = areaList[0];
+        if (!selectedRegion && r0) {
+          setSelectedRegion(r0.name);
+          setSelectedDistrict(r0.districts?.[0] || "");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
+    );
+    return () => controller.abort();
+  }, [areaList, selectedRegion]);
 
   useEffect(() => {
     if (!selectedRegion && !selectedDistrict) return;
     const controller = new AbortController();
     const qs = new URLSearchParams({ region: selectedRegion, district: selectedDistrict });
-    //o'zgardi
-    fetch(`https://ramazon-taqvimi-2026.onrender.com/api/namozvaqti?${qs.toString()}`, {
-  signal: controller.signal
-      })
+    fetch(`${API_BASE}/namozvaqti?${qs.toString()}`, { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("failed");
         return r.json();
@@ -72,10 +144,7 @@ const Index = () => {
     if (!selectedRegion && !selectedDistrict) return;
     const controller = new AbortController();
     const qs = new URLSearchParams({ region: selectedRegion, district: selectedDistrict });
-    //o'zgardi
-    fetch(`https://ramazon-taqvimi-2026.onrender.com/api/ramazon-2026?${qs.toString()}`, {
-  signal: controller.signal
-      })
+    fetch(`${API_BASE}/ramazon-2026?${qs.toString()}`, { signal: controller.signal })
       .then(async (r) => {
         if (!r.ok) throw new Error("failed");
         return r.json();
@@ -110,6 +179,17 @@ const Index = () => {
   return (
     <div className="relative min-h-screen">
       <StarryBackground />
+
+      <a
+        href="/ramazon-taqvimi.apk" // <-- Mana shu joyni o'zgartirdik
+        target="_blank"
+        rel="noopener noreferrer"
+        download
+        className="fixed top-4 right-4 z-20 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors shadow-lg border border-border"
+        aria-label="Mobil ilovani yuklash (APK)"
+      >
+        📱 Mobil ilovani yuklash
+      </a>
 
       <div className="relative z-10 max-w-4xl mx-auto px-4 py-8 md:py-12 space-y-8">
         {/* Header */}
